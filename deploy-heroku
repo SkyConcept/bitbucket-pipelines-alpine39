@@ -1,0 +1,67 @@
+#!/usr/bin/env python2
+import os
+import requests
+import sys
+
+APP_NAME = os.getenv('HEROKU_APP_NAME')
+API_KEY = os.getenv('HEROKU_API_KEY')
+HEROKU_VER = os.getenv('HEROKU_VERSION')
+
+HEROKU_REQUESTS_HEADERS = {
+  'Accept': 'application/vnd.heroku+json; version=3',
+  'Authorization': 'Bearer {key}'.format(key=API_KEY),
+}
+
+print('Deploying Heroku Version {0}'.format(HEROKU_VER))
+
+
+def get_urls():
+    url = 'https://api.heroku.com/apps/{app}/sources'.format(app=APP_NAME)
+    response = requests.post(url, headers=HEROKU_REQUESTS_HEADERS)
+    if not response.ok:
+        print('Can\'t get urls from Heroku')
+        sys.exit(1)
+
+    urls = response.json()
+    return urls['source_blob']
+
+
+def send_build(url):
+    requests.put(url, data=open('deploy.tgz', 'rb'),
+                  headers={'Content-Type': ''}, stream=True)
+
+
+def get_stream_url(source_get_url):
+    data = {
+        'source_blob': {
+            'url': source_get_url,
+            'version': os.getenv('BITBUCKET_COMMIT'),
+        }
+    }
+
+    url = 'https://api.heroku.com/apps/{}/builds'.format(APP_NAME)
+    response = requests.post(url, json=data, headers=HEROKU_REQUESTS_HEADERS)
+
+    if not response.ok:
+        print('Can\'t get urls from Heroku')
+        sys.exit(1)
+
+    json = response.json()
+    return json['output_stream_url']
+
+
+def print_build_stream(output_stream_url):
+    response = requests.get(output_stream_url)
+    for line in response.iter_lines():
+        print(line)
+
+
+if __name__ == "__main__":
+    heroku_urls = get_urls()
+
+    # send package to heroku
+    send_build(heroku_urls.get('put_url'))
+
+    # read heroku pipeline
+    stream_url = get_stream_url(heroku_urls.get('get_url'))
+    print_build_stream(stream_url)
